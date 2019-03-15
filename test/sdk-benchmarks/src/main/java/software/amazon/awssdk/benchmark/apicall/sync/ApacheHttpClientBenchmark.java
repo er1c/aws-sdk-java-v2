@@ -15,10 +15,14 @@
 
 package software.amazon.awssdk.benchmark.apicall.sync;
 
-import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.LOCAL_URI;
-import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.PORT_NUMBER;
+import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.LOCAL_HTTP_URI;
+import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.HTTP_PORT_NUMBER;
 
 import java.util.Collection;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -26,6 +30,7 @@ import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -55,28 +60,49 @@ public class ApacheHttpClientBenchmark implements SdkApiCallBenchmark {
     private MockServer mockServer;
     private SdkHttpClient sdkHttpClient;
     private ProtocolRestJsonClient client;
+    private ExecutorService executorService = Executors.newFixedThreadPool(50);
 
     @Setup(Level.Trial)
     public void setup() throws Exception {
-        mockServer = new MockServer(PORT_NUMBER);
+        mockServer = new MockServer(HTTP_PORT_NUMBER);
         mockServer.start();
         sdkHttpClient = ApacheHttpClient.builder().build();
         client = ProtocolRestJsonClient.builder()
-                                       .endpointOverride(LOCAL_URI)
+                                       .endpointOverride(LOCAL_HTTP_URI)
                                        .httpClient(sdkHttpClient)
                                        .build();
     }
 
     @TearDown(Level.Trial)
     public void tearDown() throws Exception {
+        executorService.shutdown();
         mockServer.stop();
         sdkHttpClient.close();
         client.close();
     }
 
     @Benchmark
-    public void apiCall(Blackhole blackhole) {
+    @Override
+    public void sequentialApiCall(Blackhole blackhole) {
         blackhole.consume(client.allTypes());
+    }
+
+    @Benchmark
+    @Override
+    @OperationsPerInvocation(50)
+    public void concurrentApiCall(Blackhole blackhole) {
+        CountDownLatch countDownLatch = new CountDownLatch(50);
+        for (int i = 0; i < 50; i++) {
+            CompletableFuture.runAsync(() -> client.allTypes(), executorService)
+                             .whenComplete((r, t) -> countDownLatch.countDown());
+
+        }
+
+        try {
+            countDownLatch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     public static void main(String... args) throws Exception {
@@ -87,4 +113,5 @@ public class ApacheHttpClientBenchmark implements SdkApiCallBenchmark {
             .build();
         Collection<RunResult> run = new Runner(opt).run();
     }
+
 }

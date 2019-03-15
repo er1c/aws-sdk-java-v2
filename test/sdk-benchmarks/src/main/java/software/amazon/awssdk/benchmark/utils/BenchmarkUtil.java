@@ -28,8 +28,11 @@ import software.amazon.awssdk.services.protocolec2.model.AllTypesRequest;
 @SuppressWarnings("unchecked")
 public final class BenchmarkUtil {
 
-    public static final int PORT_NUMBER = 8089;
-    public static final URI LOCAL_URI = URI.create(String.format("http://localhost:%s", PORT_NUMBER));
+    public static final int HTTP_PORT_NUMBER = 8089;
+    public static final int HTTPS_PORT_NUMBER = 9999;
+    public static final URI LOCAL_HTTP_URI = URI.create(String.format("http://localhost:%s", HTTP_PORT_NUMBER));
+    public static final URI LOCAL_HTTPS_URI = URI.create(String.format("https://localhost:%s", HTTPS_PORT_NUMBER));
+
     public static final Instant TIMESTAMP_MEMBER = LocalDateTime.now().toInstant(ZoneOffset.UTC);
 
     public static final String ERROR_JSON_BODY = "{}";

@@ -18,12 +18,22 @@ package software.amazon.awssdk.benchmark.utils;
 import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.JSON_BODY;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.security.KeyStoreException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.servlet.ServletHandler;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 
 /**
  * Local mock server used to stub fixed response.
@@ -33,6 +43,36 @@ public class MockServer {
 
     public MockServer(int port) {
         server = new Server(port);
+        ServletHandler handler = new ServletHandler();
+        handler.addServletWithMapping(AlwaysSuccessServlet.class, "/*");
+        server.setHandler(handler);
+    }
+
+    public MockServer(int httpPort, int httpsPort) throws KeyStoreException {
+        server = new Server();
+        ServerConnector connector = new ServerConnector(server);
+        connector.setPort(httpPort);
+
+        HttpConfiguration https = new HttpConfiguration();
+        https.addCustomizer(new SecureRequestCustomizer());
+
+        SslContextFactory sslContextFactory = new SslContextFactory();
+        sslContextFactory.setTrustAll(true);
+        sslContextFactory.setValidateCerts(false);
+        sslContextFactory.setNeedClientAuth(false);
+        sslContextFactory.setWantClientAuth(false);
+        sslContextFactory.setValidatePeerCerts(false);
+        sslContextFactory.setKeyStorePassword("123456");
+        sslContextFactory.setKeyManagerPassword("123456");
+        sslContextFactory.setKeyStorePath(MockServer.class.getResource("jetty.pkcs12").toExternalForm());
+
+        ServerConnector sslConnector = new ServerConnector(server,
+                                                           new SslConnectionFactory(sslContextFactory,
+                                                                                    HttpVersion.HTTP_1_1.asString()),
+                                                           new HttpConnectionFactory(https));
+        sslConnector.setPort(httpsPort);
+
+        server.setConnectors(new Connector[] {connector, sslConnector});
         ServletHandler handler = new ServletHandler();
         handler.addServletWithMapping(AlwaysSuccessServlet.class, "/*");
         server.setHandler(handler);
@@ -59,7 +99,9 @@ public class MockServer {
             } else {
                 response.setContentType("application/json");
             }
-            response.getWriter().write(JSON_BODY);
+            try(PrintWriter writer = response.getWriter()){
+                writer.write(JSON_BODY);
+            }
         }
     }
 }

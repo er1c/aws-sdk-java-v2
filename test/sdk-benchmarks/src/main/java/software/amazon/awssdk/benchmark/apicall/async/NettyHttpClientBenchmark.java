@@ -13,13 +13,13 @@
  * permissions and limitations under the License.
  */
 
-package software.amazon.awssdk.benchmark.apicall.sync;
+package software.amazon.awssdk.benchmark.apicall.async;
 
+import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.HTTPS_PORT_NUMBER;
 import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.LOCAL_HTTP_URI;
 import static software.amazon.awssdk.benchmark.utils.BenchmarkUtil.HTTP_PORT_NUMBER;
 
 import java.util.Collection;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,9 +43,9 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import software.amazon.awssdk.benchmark.utils.MockServer;
-import software.amazon.awssdk.http.SdkHttpClient;
-import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
-import software.amazon.awssdk.services.protocolrestjson.ProtocolRestJsonClient;
+import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
+import software.amazon.awssdk.services.protocolrestjson.ProtocolRestJsonAsyncClient;
 
 /**
  * Benchmarking for running with different http clients.
@@ -55,59 +55,60 @@ import software.amazon.awssdk.services.protocolrestjson.ProtocolRestJsonClient;
 @Measurement(iterations = 5, time = 10, timeUnit = TimeUnit.SECONDS)
 @Fork(2) // To reduce difference between each run
 @BenchmarkMode(Mode.Throughput)
-public class UrlConnectionHttpClientClientBenchmark implements SdkApiCallBenchmark {
+public class NettyHttpClientBenchmark {
 
+    private static final int CONCURRENT_CALLS = 50;
     private MockServer mockServer;
-    private SdkHttpClient sdkHttpClient;
-    private ProtocolRestJsonClient client;
+    private SdkAsyncHttpClient sdkHttpClient;
+    private ProtocolRestJsonAsyncClient client;
     private ExecutorService executorService = Executors.newFixedThreadPool(50);
 
     @Setup(Level.Trial)
     public void setup() throws Exception {
-        mockServer = new MockServer(HTTP_PORT_NUMBER);
+        mockServer = new MockServer(HTTP_PORT_NUMBER, HTTPS_PORT_NUMBER);
         mockServer.start();
-        sdkHttpClient = UrlConnectionHttpClient.builder().build();
-        client = ProtocolRestJsonClient.builder()
-                                       .endpointOverride(LOCAL_HTTP_URI)
-                                       .httpClient(sdkHttpClient)
-                                       .build();
+        sdkHttpClient = NettyNioAsyncHttpClient.builder().build();
+        client = ProtocolRestJsonAsyncClient.builder()
+                                            .endpointOverride(LOCAL_HTTP_URI)
+                                            .httpClient(sdkHttpClient)
+                                            .build();
     }
 
     @TearDown(Level.Trial)
     public void tearDown() throws Exception {
+        executorService.shutdown();
         mockServer.stop();
         sdkHttpClient.close();
         client.close();
     }
 
     @Benchmark
-    @Override
-    public void sequentialApiCall(Blackhole blackhole) {
-        blackhole.consume(client.allTypes());
+    @OperationsPerInvocation(CONCURRENT_CALLS)
+    public void concurrentApiCall(Blackhole blackhole) throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(CONCURRENT_CALLS);
+        for (int i = 0; i < CONCURRENT_CALLS; i++) {
+            client.allTypes().whenComplete((r, t) -> {
+                if (r != null) {
+                    blackhole.consume(r);
+                } else {
+                    blackhole.consume(t);
+                }
+                countDownLatch.countDown();
+            });
+        }
+
+        countDownLatch.await(10, TimeUnit.SECONDS);
     }
 
     @Benchmark
-    @OperationsPerInvocation(50)
-    @Override
-    public void concurrentApiCall(Blackhole blackhole) {
-        CountDownLatch countDownLatch = new CountDownLatch(50);
-        for (int i = 0; i < 50; i++) {
-            CompletableFuture.runAsync(() -> client.allTypes(), executorService)
-                             .whenComplete((r, t) -> countDownLatch.countDown());
-
-        }
-
-        try {
-            countDownLatch.await(10, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+    public void sequentialApiCall(Blackhole blackhole) {
+        blackhole.consume(client.allTypes().join());
     }
 
     public static void main(String... args) throws Exception {
 
         Options opt = new OptionsBuilder()
-            .include(UrlConnectionHttpClientClientBenchmark.class.getSimpleName())
+            .include(NettyHttpClientBenchmark.class.getSimpleName())
             .addProfiler(StackProfiler.class)
             .build();
         Collection<RunResult> run = new Runner(opt).run();

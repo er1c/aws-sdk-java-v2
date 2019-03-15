@@ -31,7 +31,8 @@ public class BenchmarkRunner {
     private static final List<String> BENCHMARKS_TO_RUN =
         Arrays.asList("Ec2ProtocolBenchmark", "JsonProtocolBenchmark", "QueryProtocolBenchmark", "XmlProtocolBenchmark",
                       "V2OptimizedClientCreationBenchmark", "V1ClientCreationBenchmark", "V2DefaultClientCreationBenchmark",
-                      "ApacheHttpClientBenchmark", "UrlConnectionHttpClientClientBenchmark");
+                      "ApacheHttpClientBenchmark", "UrlConnectionHttpClientClientBenchmark",
+                      "NettyHttpClientBenchmark", "NettyHttpClientSslBenchmark");
     private static final Logger log = Logger.loggerFor(BenchmarkRunner.class);
     private final List<String> benchmarksToRun;
 
